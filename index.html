@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IBDP Physics Projectile Motion Simulator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #controls {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+      width: 100%;
+      max-width: 800px;
+    }
+    #controls label {
+      display: inline-block;
+      width: 150px;
+      margin: 10px 0;
+    }
+    #controls input, #controls select {
+      margin-left: 10px;
+      padding: 5px;
+      width: 100px;
+    }
+    #output {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-top: 10px;
+      width: 100%;
+      max-width: 800px;
+    }
+    #theory {
+      background: #e6f3ff;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+      width: 100%;
+      max-width: 800px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      cursor: pointer;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    canvas {
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h2>Projectile Motion Simulator</h2>
+    <label>Initial Velocity (m/s):</label>
+    <input type="range" id="v0" min="0" max="100" value="20">
+    <input type="number" id="v0Num" min="0" max="100" value="20"><br>
+    
+    <label>Launch Angle (°):</label>
+    <input type="range" id="theta" min="0" max="90" value="45">
+    <input type="number" id="thetaNum" min="0" max="90" value="45"><br>
+    
+    <label>Initial Height (m):</label>
+    <input type="range" id="h0" min="0" max="100" value="0">
+    <input type="number" id="h0Num" min="0" max="100" value="0"><br>
+    
+    <label>Drag Coefficient (k):</label>
+    <input type="range" id="k" min="0" max="0.1" value="0" step="0.001">
+    <input type="number" id="kNum" min="0" max="0.1" value="0" step="0.001"><br>
+    
+    <label>Show Vectors:</label>
+    <input type="checkbox" id="showVectors"><br>
+    
+    <button onclick="startSim()">Start</button>
+    <button onclick="pauseSim()">Pause</button>
+    <button onclick="resetSim()">Reset</button>
+    <button onclick="toggleTheory()">Show/Hide Theory</button>
+  </div>
+  <div id="output">
+    <h3>Results</h3>
+    <p>Time of Flight: <span id="time">0</span> s</p>
+    <p>Maximum Height: <span id="maxHeight">0</span> m</p>
+    <p>Horizontal Range: <span id="range">0</span> m</p>
+    <p>Final Velocity: <span id="finalV">0</span> m/s at <span id="finalAngle">0</span>°</p>
+  </div>
+  <div id="theory" style="display: none;">
+    <h3>Projectile Motion Theory</h3>
+    <p><strong>Equations (No Drag):</strong></p>
+    <ul>
+      <li>Horizontal velocity: vₓ = v₀ cos(θ)</li>
+      <li>Vertical velocity: vᵧ = v₀ sin(θ) - g t</li>
+      <li>Horizontal position: x = vₓ t</li>
+      <li>Vertical position: y = h₀ + v₀ sin(θ) t - ½ g t²</li>
+      <li>Maximum height: H = h₀ + (v₀ sin(θ))² / (2g)</li>
+      <li>Range: R = vₓ * t_total (where t_total is time to reach y=0)</li>
+    </ul>
+    <p><strong>With Drag:</strong> Drag force F_d = -k v |v|, where v is velocity vector. Affects both x and y motion numerically.</p>
+    <p><strong>Assumptions (No Drag):</strong> Constant gravity (g = 9.81 m/s²), no horizontal acceleration.</p>
+    <p><strong>Applications:</strong> Sports (e.g., basketball), artillery, space launches.</p>
+  </div>
+  <script>
+    let v0 = 20, theta = 45, h0 = 0, k = 0;
+    const g = 9.81; // Fixed gravity
+    let showVectors = false;
+    let running = false, paused = false;
+    let t = 0, path = [], maxH = 0, range = 0, timeFlight = 0;
+    let vx = 0, vy = 0; // Current velocities
+    let x = 0, y = 0; // Current position
+    let scale = 10; // Pixels per meter
+    let dt = 0.016; // Time step (~60 fps)
+
+    function setup() {
+      createCanvas(800, 400);
+      syncInputs();
+      resetSim();
+    }
+
+    function draw() {
+      background(255);
+      // Draw ground
+      stroke(0);
+      line(0, height - h0 * scale, width, height - h0 * scale);
+      
+      if (running && !paused) {
+        t += dt;
+        let rad = theta * PI / 180;
+        
+        // Initialize velocities at t=0
+        if (t <= dt) {
+          vx = v0 * cos(rad);
+          vy = v0 * sin(rad);
+          x = 0;
+          y = h0;
+        }
+        
+        // Calculate drag force: F_d = -k * v * |v|
+        let vMag = sqrt(vx * vx + vy * vy);
+        let ax = -k * vx * vMag;
+        let ay = -g - k * vy * vMag;
+        
+        // Update velocities
+        vx += ax * dt;
+        vy += ay * dt;
+        
+        // Update position
+        x += vx * dt;
+        y += vy * dt;
+        
+        // Transform to canvas coordinates
+        let px = x * scale;
+        let py = height - y * scale;
+        
+        // Update calculations
+        if (y >= 0) {
+          path.push([px, py]);
+          maxH = max(maxH, y);
+        }
+        if (y < 0 && t > 0.1) {
+          running = false;
+          range = x;
+          timeFlight = t;
+          let finalV = sqrt(vx * vx + vy * vy);
+          let finalAngle = atan2(vy, vx) * 180 / PI;
+          
+          // Update output panel
+          document.getElementById('time').innerText = timeFlight.toFixed(2);
+          document.getElementById('maxHeight').innerText = maxH.toFixed(2);
+          document.getElementById('range').innerText = range.toFixed(2);
+          document.getElementById('finalV').innerText = finalV.toFixed(2);
+          document.getElementById('finalAngle').innerText = finalAngle.toFixed(2);
+        }
+        
+        // Draw projectile
+        fill(255, 0, 0);
+        ellipse(px, py, 10, 10);
+        
+        // Draw vectors
+        if (showVectors && y >= 0) {
+          stroke(0, 0, 255);
+          line(px, py, px + vx * scale * 0.1, py);
+          stroke(255, 0, 0);
+          line(px, py, px, py - vy * scale * 0.1);
+        }
+      }
+      
+      // Draw path
+      stroke(0, 100, 255);
+      noFill();
+      beginShape();
+      for (let p of path) {
+        vertex(p[0], p[1]);
+      }
+      endShape();
+      
+      // Draw max height and range
+      if (!running && path.length > 0) {
+        stroke(0);
+        line(path[path.length-1][0], height, path[path.length-1][0], height - maxH * scale);
+        text(`Range: ${range.toFixed(2)} m`, path[path.length-1][0] + 10, height - 10);
+        text(`Max Height: ${maxH.toFixed(2)} m`, 10, height - maxH * scale);
+      }
+      
+      // Draw axes
+      stroke(0);
+      textAlign(LEFT);
+      text("X (m)", width - 30, height - 10);
+      textAlign(RIGHT);
+      text("Y (m)", 10, 20);
+    }
+
+    function syncInputs() {
+      let v0Slider = document.getElementById('v0');
+      let v0Num = document.getElementById('v0Num');
+      let thetaSlider = document.getElementById('theta');
+      let thetaNum = document.getElementById('thetaNum');
+      let h0Slider = document.getElementById('h0');
+      let h0Num = document.getElementById('h0Num');
+      let kSlider = document.getElementById('k');
+      let kNum = document.getElementById('kNum');
+      
+      v0Slider.oninput = () => { v0Num.value = v0Slider.value; v0 = float(v0Slider.value); };
+      v0Num.oninput = () => { v0Slider.value = v0Num.value; v0 = float(v0Num.value); };
+      thetaSlider.oninput = () => { thetaNum.value = thetaSlider.value; theta = float(thetaSlider.value); };
+      thetaNum.oninput = () => { thetaSlider.value = thetaNum.value; theta = float(thetaNum.value); };
+      h0Slider.oninput = () => { h0Num.value = h0Slider.value; h0 = float(h0Slider.value); };
+      h0Num.oninput = () => { h0Slider.value = h0Num.value; h0 = float(h0Num.value); };
+      kSlider.oninput = () => { kNum.value = kSlider.value; k = float(kSlider.value); };
+      kNum.oninput = () => { kSlider.value = kNum.value; k = float(kNum.value); };
+      
+      document.getElementById('showVectors').onchange = () => {
+        showVectors = document.getElementById('showVectors').checked;
+      };
+    }
+
+    function startSim() {
+      running = true;
+      paused = false;
+      t = 0;
+      path = [];
+      maxH = 0;
+      x = 0;
+      y = h0;
+    }
+
+    function pauseSim() {
+      paused = !paused;
+    }
+
+    function resetSim() {
+      running = false;
+      paused = false;
+      t = 0;
+      path = [];
+      maxH = 0;
+      range = 0;
+      timeFlight = 0;
+      x = 0;
+      y = h0;
+      document.getElementById('time').innerText = '0';
+      document.getElementById('maxHeight').innerText = '0';
+      document.getElementById('range').innerText = '0';
+      document.getElementById('finalV').innerText = '0';
+      document.getElementById('finalAngle').innerText = '0';
+    }
+
+    function toggleTheory() {
+      let theoryDiv = document.getElementById('theory');
+      theoryDiv.style.display = theoryDiv.style.display === 'none' ? 'block' : 'none';
+    }
+  </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'95de49409ed63c2e',t:'MTc1MjI5OTY2OC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
